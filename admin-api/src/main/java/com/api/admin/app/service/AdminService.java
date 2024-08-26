@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
+import com.api.admin.app.config.ErrorCodeConfig;
 import com.api.admin.app.exception.RestaurantDoNotExist;
 import com.api.admin.app.model.FoodItem;
 import com.api.admin.app.model.RestaurantImages;
@@ -22,6 +23,9 @@ import com.api.admin.app.repository.RestaurantInfoRepo;
 @Service
 public class AdminService {
 	private static final Logger logger = LoggerFactory.getLogger(AdminService.class);
+	
+
+    private final ErrorCodeConfig errorCodeConfig;
 
     @Autowired
     private RestaurantInfoRepo restaurantInfoRepo;
@@ -30,6 +34,11 @@ public class AdminService {
 
     @Autowired
     private FoodItemRepo foodItemRepo;
+    
+    @Autowired
+    public AdminService(ErrorCodeConfig errorCodeConfig) {
+        this.errorCodeConfig = errorCodeConfig;
+    }
 
     public ResponseEntity<String> addRestaurant(Map entity) {
     	logger.info("********************************************************" + "success");
@@ -118,8 +127,10 @@ public class AdminService {
         Optional<RestaurantInfo> restInfo = restaurantInfoRepo.findById((Integer) entity.get("restaurantid"));
         Optional<FoodItem> fooditem = foodItemRepo.findByRestaurantidAndFoodname((Integer) entity.get("restaurantid"),
                 (String) entity.get("foodname"));
+      
         if (restInfo.isEmpty()) {
-        	throw new RestaurantDoNotExist("Restaurant not found with this id : " +(Integer) entity.get("restaurantid"));
+            String errorMessage = errorCodeConfig.getErrorMessage("1001");
+            throw new RestaurantDoNotExist(errorMessage+ "	"+(Integer) entity.get("restaurantid") + ". " );
         }
         if (fooditem.isPresent()) {
             return ResponseEntity.badRequest().body("This food item is already present!");
@@ -148,10 +159,15 @@ public class AdminService {
         Optional<FoodItem> fooditem1 = foodItemRepo.findByRestaurantidAndFoodname((Integer) entity.get("restaurantid"),
                 (String) entity.get("foodname"));
 
+		
 		/*
 		 * if (fooditem1.isPresent() && fooditem1.get().getFooditemid() != fooditemid) {
-		 * return ResponseEntity.ok().body("name"); }
+		 * String errorMessage = errorCodeConfig.getErrorMessage("1002");
+		 * 
+		 * throw new RestaurantDoNotExist(errorMessage+ "	"+(Integer)
+		 * entity.get("foodname") + ". " ); }
 		 */
+		 
         Optional<FoodItem> fooditem = foodItemRepo.findById(fooditemid);
         FoodItem f = fooditem.get();
         f.setFoodname((String) entity.get("foodname"));
