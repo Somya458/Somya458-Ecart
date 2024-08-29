@@ -21,6 +21,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
+import com.order.api.app.client.NotificationClient;
 import com.order.api.app.client.UserClient;
 import com.order.api.app.exception.UserNotFoundException;
 import com.order.api.app.model.FoodItem;
@@ -49,6 +50,8 @@ public class OrderService {
 	@Autowired
 	private UserClient userClient;
 	@Autowired
+	private NotificationClient notificationClient;
+	@Autowired
 	private OrderInfoRepo orderInfoRepo;
 	@Autowired
 	private FoodItemRepo foodItemRepo;
@@ -60,46 +63,43 @@ public class OrderService {
 	private RestaurantRatingRepo restaurantRatingRepo;
 
 	public ResponseEntity<List<RestaurantInfo>> searchByName(Map<String, String> entity) {
-	    String search = entity.get("search");
+		String search = entity.get("search");
 
-	    List<String> words = Arrays.stream(search.split(" "))
-	                               .filter(word -> !word.trim().isEmpty())
-	                               .collect(Collectors.toList());
+		List<String> words = Arrays.stream(search.split(" ")).filter(word -> !word.trim().isEmpty())
+				.collect(Collectors.toList());
 
-	    List<RestaurantInfo> common = words.stream()
-	        .flatMap(word -> orderRepository.findByRestaurantnameContaining(word, Sort.by(Sort.Direction.DESC, "restaurantrating")).stream())
-	        .collect(Collectors.toList());
+		List<RestaurantInfo> common = words.stream()
+				.flatMap(word -> orderRepository
+						.findByRestaurantnameContaining(word, Sort.by(Sort.Direction.DESC, "restaurantrating"))
+						.stream())
+				.collect(Collectors.toList());
 
-	    List<RestaurantInfo> restaurant = common.stream()
-	        .distinct()
-	        .collect(Collectors.toList());
+		List<RestaurantInfo> restaurant = common.stream().distinct().collect(Collectors.toList());
 
-	    return ResponseEntity.ok().body(restaurant);
+		return ResponseEntity.ok().body(restaurant);
 	}
 
-
 	public ResponseEntity<List<SearchFoodItem>> searchByFoodItem(Map<String, String> entity) {
-	    String search = entity.get("search");
+		String search = entity.get("search");
 
-	    List<String> words = Arrays.stream(search.split(" "))
-	                               .filter(word -> !word.trim().isEmpty())
-	                               .collect(Collectors.toList());
+		List<String> words = Arrays.stream(search.split(" ")).filter(word -> !word.trim().isEmpty())
+				.collect(Collectors.toList());
 
-	    List<FoodItem> foodItems = words.stream()
-	        .flatMap(word -> foodItemRepo.findByFoodnameContaining(word, Sort.by(Sort.Direction.DESC, "fooditemrating")).stream())
-	        .collect(Collectors.toList());
+		List<FoodItem> foodItems = words.stream()
+				.flatMap(word -> foodItemRepo
+						.findByFoodnameContaining(word, Sort.by(Sort.Direction.DESC, "fooditemrating")).stream())
+				.collect(Collectors.toList());
 
-	    List<SearchFoodItem> sfoodItem = foodItems.stream()
-	        .map(food -> {
-	            RestaurantInfo rest = food.getRestaurantInfo();
-	            logger.info("Restaurant Id" + ":" + rest.getRestaurantid());
-	            return new SearchFoodItem(rest.getRestaurantid(), rest.getRestaurantname(), rest.getRestaurantaddress(), rest.getRestaurantrating(), food);
-	        })
-	        .collect(Collectors.toList());
+		List<SearchFoodItem> sfoodItem = foodItems.stream().map(food -> {
+			RestaurantInfo rest = food.getRestaurantInfo();
+			logger.info("Restaurant Id" + ":" + rest.getRestaurantid());
+			return new SearchFoodItem(rest.getRestaurantid(), rest.getRestaurantname(), rest.getRestaurantaddress(),
+					rest.getRestaurantrating(), food);
+		}).collect(Collectors.toList());
 
-	    List<SearchFoodItem> food = new ArrayList<>(new LinkedHashSet<>(sfoodItem));
+		List<SearchFoodItem> food = new ArrayList<>(new LinkedHashSet<>(sfoodItem));
 
-	    return ResponseEntity.ok().body(food);
+		return ResponseEntity.ok().body(food);
 	}
 
 	/*
@@ -153,63 +153,71 @@ public class OrderService {
 	 * return ResponseEntity.ok().body("Order placed successfully!"); }
 	 */
 	public ResponseEntity<String> placeOrder(Map<String, Object> entity) {
-	    // Fetch the restaurant details
-	    Optional<RestaurantInfo> restaurantInfo = restaurantInfoRepo.findById((Integer) entity.get("restaurantid"));
-	    if (!restaurantInfo.isPresent()) {
-	        return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Restaurant not found.");
-	    }
-	    RestaurantInfo rest = restaurantInfo.get();
-	    logger.info("Restaurant Id: {}", rest.getRestaurantid());
-	    logger.info("************Calling USER_API for userDetails******************");
+		// Fetch the restaurant details
+		Optional<RestaurantInfo> restaurantInfo = restaurantInfoRepo.findById((Integer) entity.get("restaurantid"));
+		if (!restaurantInfo.isPresent()) {
+			return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Restaurant not found.");
+		}
+		RestaurantInfo rest = restaurantInfo.get();
+		logger.info("Restaurant Id: {}", rest.getRestaurantid());
+		logger.info("************Calling USER_API for userDetails******************");
 
-	    // Fetch the user details using Feign client
-	    UserInfo user = finduserInfo(entity);
-	    logger.info("User Details: {}", user.getPhonenumber());
+		// Fetch the user details using Feign client
+		UserInfo userInfo = finduserInfo(entity);
+		logger.info("User Details: {}", userInfo.getPhonenumber());
 
-	    // Validate food items
-	    List<String> foodItemIds = (List<String>) entity.get("fooditemid");
-	    boolean allFoodItemsExist = foodItemIds.stream()
-	        .map(id -> foodItemRepo.findById(Integer.parseInt(id)))
-	        .allMatch(Optional::isPresent);
+		// Validate food items
+		List<String> foodItemIds = (List<String>) entity.get("fooditemid");
+		boolean allFoodItemsExist = foodItemIds.stream().map(id -> foodItemRepo.findById(Integer.parseInt(id)))
+				.allMatch(Optional::isPresent);
 
-	    if (!allFoodItemsExist) {
-	        return ResponseEntity.status(HttpStatus.NOT_FOUND).body("One or more food items not found.");
-	    }
+		if (!allFoodItemsExist) {
+			return ResponseEntity.status(HttpStatus.NOT_FOUND).body("One or more food items not found.");
+		}
 
-	    // If all validations pass, place the order
-	    OrderInfo orderInfo = new OrderInfo();
-	    orderInfo.setRestaurantid((Integer) entity.get("restaurantid"));
-	    orderInfo.setRestaurantname(rest.getRestaurantname());
-	    orderInfo.setUserid(user.getUserid());
-	    orderInfo.setDeliveryaddress((String) entity.get("deliveryaddress"));
-	    orderInfo.setTotalamount((Integer) entity.get("totalamount"));
-	    orderInfoRepo.save(orderInfo);
+		// If all validations pass, place the order
+		OrderInfo orderInfo = new OrderInfo();
+		orderInfo.setRestaurantid((Integer) entity.get("restaurantid"));
+		orderInfo.setRestaurantname(rest.getRestaurantname());
+		orderInfo.setUserid(userInfo.getUserid());
+		orderInfo.setDeliveryaddress((String) entity.get("deliveryaddress"));
+		orderInfo.setTotalamount((Integer) entity.get("totalamount"));
+		orderInfoRepo.save(orderInfo);
 
-	    // Process each food item and save the order
-	    List<String> foodNames = (List<String>) entity.get("foodname");
-	    int amount = (Integer) entity.get("totalamount");
-	    List<Integer> quantities = (List<Integer>) entity.get("quantity");
+		// Process each food item and save the order
+		List<String> foodNames = (List<String>) entity.get("foodname");
+		int amount = (Integer) entity.get("totalamount");
+		List<Integer> quantities = (List<Integer>) entity.get("quantity");
 
-	    // Combine the lists and iterate
-	    IntStream.range(0, foodItemIds.size())
-	        .forEach(i -> {
-	            OrderFoodItems orderFoodItems = new OrderFoodItems();
-	            orderFoodItems.setFooditemid(Integer.parseInt(foodItemIds.get(i)));
-	            orderFoodItems.setFoodname(foodNames.get(i));
-	            orderFoodItems.setAmount(amount);
-	            orderFoodItems.setQuantity(quantities.get(i));
-	            orderFoodItems.setOrderinfo(orderInfo);
+		// Combine the lists and iterate
+		IntStream.range(0, foodItemIds.size()).forEach(i -> {
+			OrderFoodItems orderFoodItems = new OrderFoodItems();
+			orderFoodItems.setFooditemid(Integer.parseInt(foodItemIds.get(i)));
+			orderFoodItems.setFoodname(foodNames.get(i));
+			orderFoodItems.setAmount(amount);
+			orderFoodItems.setQuantity(quantities.get(i));
+			orderFoodItems.setOrderinfo(orderInfo);
 
-	            orderInfo.getOrderFoodItems().add(orderFoodItems);
-	        });
+			orderInfo.getOrderFoodItems().add(orderFoodItems);
+		});
 
-	    // Save the final order with all food items
-	    orderInfoRepo.save(orderInfo);
-	    logger.info("Order placed: {}", orderInfo);
+		// Save the final order with all food items
+		orderInfoRepo.save(orderInfo);
+		logger.info("Order placed: {}", orderInfo);
+		// Call Notification service for sending email notification
+		Map<String, String> notificationRequest = new HashMap<>();
+		notificationRequest.put("email", userInfo.getEmail());
+		notificationRequest.put("subject", "Order Placed Successfully");
+		String username = userInfo.getName();
+		String message = "Hi " + username + ",\nYour order with ID " + orderInfo.getOrderid()
+				+ " has been placed successfully!";
+		notificationRequest.put("message", message);
 
-	    return ResponseEntity.ok().body("Order placed successfully!");
+		notificationClient.sendOrderPlacedNotification(notificationRequest);
+		logger.info("Email Notification sent to user");
+
+		return ResponseEntity.ok().body("Order placed successfully!");
 	}
-
 
 	private UserInfo finduserInfo(Map entity) {
 		UserInfo userInfo;
@@ -327,78 +335,83 @@ public class OrderService {
 	 * return ResponseEntity.ok().body("Rating Added"); }
 	 */
 	public ResponseEntity<String> rateOrder(Map<String, Object> entity) {
-	    Integer restaurantId = (Integer) entity.get("restaurantid");
-	    Integer orderId = (Integer) entity.get("orderid");
-	    Integer restaurantRating = (Integer) entity.get("restaurantrating");
-	    String restaurantReview = (String) entity.get("restaurantreview");
-	    
-	    // Fetch restaurant info
-	    RestaurantInfo rest = restaurantInfoRepo.findById(restaurantId).orElseThrow(() -> new RuntimeException("Restaurant not found"));
+		Integer restaurantId = (Integer) entity.get("restaurantid");
+		Integer orderId = (Integer) entity.get("orderid");
+		Integer restaurantRating = (Integer) entity.get("restaurantrating");
+		String restaurantReview = (String) entity.get("restaurantreview");
 
-	    // Fetch user info
-	    UserInfo user = Optional.ofNullable(finduserInfo(entity)).orElseThrow(() -> new RuntimeException("User not found"));
-	    Integer userId = user.getUserid();
+		// Fetch restaurant info
+		RestaurantInfo rest = restaurantInfoRepo.findById(restaurantId)
+				.orElseThrow(() -> new RuntimeException("Restaurant not found"));
 
-	    // Fetch order info
-	    OrderInfo orderInfo = orderInfoRepo.findByUseridAndOrderid(userId, orderId)
-	            .orElseThrow(() -> new RuntimeException("Order not found"));
-	    
-	    orderInfo.setOrderflag(1);
-	    orderInfoRepo.save(orderInfo);
+		// Fetch user info
+		UserInfo user = Optional.ofNullable(finduserInfo(entity))
+				.orElseThrow(() -> new RuntimeException("User not found"));
+		Integer userId = user.getUserid();
 
-	    // Update restaurant rating
-	    float newRating = (rest.getRestaurantrating() * rest.getNumofrating() + restaurantRating) / (rest.getNumofrating() + 1);
-	    rest.setRestaurantrating(newRating);
-	    rest.setNumofrating(rest.getNumofrating() + 1);
-	    restaurantInfoRepo.save(rest);
+		// Fetch order info
+		OrderInfo orderInfo = orderInfoRepo.findByUseridAndOrderid(userId, orderId)
+				.orElseThrow(() -> new RuntimeException("Order not found"));
 
-	    // Save restaurant rating
-	    RestaurantRating restaurantRatingObj = new RestaurantRating();
-	    restaurantRatingObj.setName(user.getName());
-	    restaurantRatingObj.setRestaurantid(restaurantId);
-	    restaurantRatingObj.setRestaurantname(rest.getRestaurantname());
-	    restaurantRatingObj.setRestaurantrating(newRating);
-	    restaurantRatingObj.setRestaurantreview(restaurantReview);
-	    restaurantRatingRepo.save(restaurantRatingObj);
+		orderInfo.setOrderflag(1);
+		orderInfoRepo.save(orderInfo);
 
-	    // Handle food item ratings
-	    List<String> foodItemIds = (List<String>) entity.get("fooditemid");
-	    if (foodItemIds.isEmpty()) {
-	        return ResponseEntity.ok().body("Success");
-	    }
+		// Update restaurant rating
+		float newRating = (rest.getRestaurantrating() * rest.getNumofrating() + restaurantRating)
+				/ (rest.getNumofrating() + 1);
+		rest.setRestaurantrating(newRating);
+		rest.setNumofrating(rest.getNumofrating() + 1);
+		restaurantInfoRepo.save(rest);
 
-	    List<String> foodItemRatings = (List<String>) entity.get("fooditemrating");
-	    List<String> foodItemReviews = (List<String>) entity.get("fooditemreview");
-	    List<String> numOfRatings = (List<String>) entity.get("numofrating");
-	    
-	    if (numOfRatings == null) {
-	        numOfRatings = Collections.singletonList("1");
-	    }
+		// Save restaurant rating
+		RestaurantRating restaurantRatingObj = new RestaurantRating();
+		restaurantRatingObj.setName(user.getName());
+		restaurantRatingObj.setRestaurantid(restaurantId);
+		restaurantRatingObj.setRestaurantname(rest.getRestaurantname());
+		restaurantRatingObj.setRestaurantrating(newRating);
+		restaurantRatingObj.setRestaurantreview(restaurantReview);
+		restaurantRatingRepo.save(restaurantRatingObj);
 
-	    IntStream.range(0, foodItemIds.size()).forEach(i -> {
-	        Integer foodItemId = Integer.parseInt(foodItemIds.get(i));
-	        FoodItem foodItem = foodItemRepo.findById(foodItemId).orElseThrow(() -> new RuntimeException("Food item not found"));
-	        
-	        FoodItemRating foodItemRating = new FoodItemRating();
-	        foodItemRating.setName(user.getName());
-	        foodItemRating.setRestaurantid(restaurantId);
-	        foodItemRating.setRestaurantname(rest.getRestaurantname());
-	        foodItemRating.setFooditemid(foodItemId);
-	        foodItemRating.setFoodname(foodItem.getFoodname());
-	        foodItemRating.setFooditemrating(Double.parseDouble(foodItemRatings.get(i)));
-	        foodItemRating.setFooditemreview(foodItemReviews.get(i));
-	        foodItemRatingRepo.save(foodItemRating);
-	        
-	        // Update food item rating
-	        double foodRating = (foodItem.getFooditemrating() != null ? foodItem.getFooditemrating() : 0.0);
-	        int numRatings = (foodItem.getNumofrating() != null ? foodItem.getNumofrating() : 0);
-	        double updatedRating = (foodRating * numRatings + Double.parseDouble(foodItemRatings.get(i))) / (numRatings + 1);
-	        foodItem.setFooditemrating(updatedRating);
-	        foodItem.setNumofrating(numRatings + 1);
-	        foodItemRepo.save(foodItem);
-	    });
+		// Handle food item ratings
+		List<String> foodItemIds = (List<String>) entity.get("fooditemid");
+		if (foodItemIds.isEmpty()) {
+			return ResponseEntity.ok().body("Success");
+		}
 
-	    return ResponseEntity.ok().body("Rating Added");
+		List<String> foodItemRatings = (List<String>) entity.get("fooditemrating");
+		List<String> foodItemReviews = (List<String>) entity.get("fooditemreview");
+		List<String> numOfRatings = (List<String>) entity.get("numofrating");
+
+		if (numOfRatings == null) {
+			numOfRatings = Collections.singletonList("1");
+		}
+
+		IntStream.range(0, foodItemIds.size()).forEach(i -> {
+			Integer foodItemId = Integer.parseInt(foodItemIds.get(i));
+			FoodItem foodItem = foodItemRepo.findById(foodItemId)
+					.orElseThrow(() -> new RuntimeException("Food item not found"));
+
+			FoodItemRating foodItemRating = new FoodItemRating();
+			foodItemRating.setName(user.getName());
+			foodItemRating.setRestaurantid(restaurantId);
+			foodItemRating.setRestaurantname(rest.getRestaurantname());
+			foodItemRating.setFooditemid(foodItemId);
+			foodItemRating.setFoodname(foodItem.getFoodname());
+			foodItemRating.setFooditemrating(Double.parseDouble(foodItemRatings.get(i)));
+			foodItemRating.setFooditemreview(foodItemReviews.get(i));
+			foodItemRatingRepo.save(foodItemRating);
+
+			// Update food item rating
+			double foodRating = (foodItem.getFooditemrating() != null ? foodItem.getFooditemrating() : 0.0);
+			int numRatings = (foodItem.getNumofrating() != null ? foodItem.getNumofrating() : 0);
+			double updatedRating = (foodRating * numRatings + Double.parseDouble(foodItemRatings.get(i)))
+					/ (numRatings + 1);
+			foodItem.setFooditemrating(updatedRating);
+			foodItem.setNumofrating(numRatings + 1);
+			foodItemRepo.save(foodItem);
+		});
+
+		return ResponseEntity.ok().body("Rating Added");
 	}
 
 	/*
@@ -416,36 +429,26 @@ public class OrderService {
 	 * 
 	 * } return ResponseEntity.ok().body(fid); }
 	 */
-	//Java8 conversion
+	// Java8 conversion
 	public ResponseEntity<List<FooditemDetails>> getAllFoodItems() {
-	    return ResponseEntity.ok().body(
-	        foodItemRepo.findAll().stream()
-	            .map(foodItem -> {
-	                RestaurantInfo ri = foodItem.getRestaurantInfo();
-	                return new FooditemDetails(ri.getRestaurantid(), foodItem, ri.getRestaurantname());
-	            })
-	            .collect(Collectors.toList())
-	    );
+		return ResponseEntity.ok().body(foodItemRepo.findAll().stream().map(foodItem -> {
+			RestaurantInfo ri = foodItem.getRestaurantInfo();
+			return new FooditemDetails(ri.getRestaurantid(), foodItem, ri.getRestaurantname());
+		}).collect(Collectors.toList()));
 	}
-
 
 	public ResponseEntity<List<OrderInfo>> getAllOrderDetails(Map entity) {
 		// Optional<UserInfo> userInfo = userInfoRepo.findByPhonenumber((String)
 		// entity.get("phonenumber"));
-		/*Optional<UserInfo> userInfo = Optional.ofNullable(finduserInfo(entity));
-		UserInfo user = userInfo.get();
-		int id = user.getUserid();
-		List<OrderInfo> oi = orderInfoRepo.findAllByUserid(id);
-		if (oi.isEmpty()) {
-			return ResponseEntity.ok().body(oi);
-		}
-		return ResponseEntity.ok().body(oi);
-	}*/// java 8 conversion
-		return Optional.ofNullable(finduserInfo(entity))
-	               .map(user -> orderInfoRepo.findAllByUserid(user.getUserid()))
-	               .map(oi -> ResponseEntity.ok().body(oi))
-	               .orElseGet(() -> ResponseEntity.ok().body(Collections.emptyList()));
+		/*
+		 * Optional<UserInfo> userInfo = Optional.ofNullable(finduserInfo(entity));
+		 * UserInfo user = userInfo.get(); int id = user.getUserid(); List<OrderInfo> oi
+		 * = orderInfoRepo.findAllByUserid(id); if (oi.isEmpty()) { return
+		 * ResponseEntity.ok().body(oi); } return ResponseEntity.ok().body(oi); }
+		 */// java 8 conversion
+		return Optional.ofNullable(finduserInfo(entity)).map(user -> orderInfoRepo.findAllByUserid(user.getUserid()))
+				.map(oi -> ResponseEntity.ok().body(oi))
+				.orElseGet(() -> ResponseEntity.ok().body(Collections.emptyList()));
 	}
 
-	
 }
